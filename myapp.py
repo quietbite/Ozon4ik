@@ -1,5 +1,5 @@
 # catalog_demo.py
-# Самодостаточный демо-каталог: данные, картинки, тема и страница в одном файле.
+# Самодостаточный демо-каталог: данные, картинки, тема, аккаунт и страница в одном файле.
 import base64
 import io
 
@@ -7,6 +7,14 @@ import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 
 st.set_page_config(page_title="Каталог", page_icon="🛍️", layout="wide")
+
+# ---------- Аккаунт (демо, без базы данных) ----------
+if "users" not in st.session_state:
+    st.session_state.users = {"demo": "demo"}   # логин: пароль
+if "user" not in st.session_state:
+    st.session_state.user = None                 # текущий вошедший пользователь
+if "auth_mode" not in st.session_state:
+    st.session_state.auth_mode = None            # None, "login" или "register"
 
 # ---------- Фейковые данные ----------
 PRODUCTS = [
@@ -35,8 +43,24 @@ CATEGORY_COLORS = {
 
 # ---------- Темы ----------
 THEMES = {
-    "Дневная": {"bg": "#ffffff", "sidebar": "#f5f5f5", "fg": "#111111"},
-    "Тёмная": {"bg": "#000000", "sidebar": "#121212", "fg": "#f5f5f5"},
+    "Дневная": {
+        "bg": "#f6f7f9",        # фон страницы
+        "sidebar": "#ffffff",   # боковые панели
+        "card": "#ffffff",      # карточки товаров и поля ввода
+        "border": "#e3e6ea",    # рамки
+        "fg": "#14171a",        # основной текст
+        "muted": "#6b7280",     # второстепенный текст
+        "accent": "#1e88e5",    # акцент (наведение, теги)
+    },
+    "Тёмная": {
+        "bg": "#0f1115",
+        "sidebar": "#161a20",
+        "card": "#1b2028",
+        "border": "#2a313c",
+        "fg": "#eef1f5",
+        "muted": "#9aa4b2",
+        "accent": "#1e88e5",
+    },
 }
 
 
@@ -48,24 +72,166 @@ def apply_theme(theme_name: str):
         .stApp, [data-testid="stHeader"] {{
             background-color: {t['bg']} !important;
         }}
-        [data-testid="stSidebar"] {{
+        [data-testid="stSidebar"], [data-testid="stSidebar"] > div {{
             background-color: {t['sidebar']} !important;
+        }}
+        [data-testid="stSidebar"] {{
+            border-right: 1px solid {t['border']};
         }}
         .stApp, .stApp p, .stApp span, .stApp label, .stApp h1,
         .stApp h2, .stApp h3, .stApp h4, .stApp li,
         [data-testid="stSidebar"] * {{
             color: {t['fg']} !important;
         }}
+        [data-testid="stCaptionContainer"] * {{
+            color: {t['muted']} !important;
+        }}
         .ozon-brand {{
-            font-size: 62px;
+            font-size: 22px;
             font-weight: 700;
             color: {t['fg']};
             margin: 0 0 8px 0;
+        }}
+
+        /* Карточки товаров */
+        [data-testid="stVerticalBlockBorderWrapper"] {{
+            background-color: {t['card']} !important;
+            border-color: {t['border']} !important;
+            border-radius: 12px !important;
+        }}
+
+        /* Формы входа и регистрации */
+        [data-testid="stForm"] {{
+            background-color: {t['card']} !important;
+            border: 1px solid {t['border']} !important;
+            border-radius: 12px !important;
+        }}
+
+        /* ===== Поля ввода, выбор категорий, сортировка: все вложенные элементы ===== */
+        [data-testid="stTextInputRootElement"],
+        [data-testid="stTextInputRootElement"] *,
+        [data-testid="stTextInput"] [data-baseweb] ,
+        [data-testid="stTextInput"] [data-baseweb] *,
+        [data-testid="stSelectbox"] [data-baseweb] ,
+        [data-testid="stSelectbox"] [data-baseweb] *,
+        [data-testid="stMultiSelect"] [data-baseweb],
+        [data-testid="stMultiSelect"] [data-baseweb] * {{
+            background-color: {t['card']} !important;
+            color: {t['fg']} !important;
+            -webkit-text-fill-color: {t['fg']} !important;
+        }}
+        [data-testid="stTextInputRootElement"],
+        [data-testid="stSelectbox"] [data-baseweb="select"] > div,
+        [data-testid="stMultiSelect"] [data-baseweb="select"] > div {{
+            border: 1px solid {t['border']} !important;
+            border-radius: 8px !important;
+        }}
+        input::placeholder {{
+            color: {t['muted']} !important;
+            -webkit-text-fill-color: {t['muted']} !important;
+        }}
+        [data-baseweb="select"] svg {{
+            fill: {t['muted']} !important;
+        }}
+
+        /* Теги выбранных категорий (после общего правила, чтобы перекрыть его) */
+        [data-testid="stMultiSelect"] [data-baseweb="tag"],
+        [data-testid="stMultiSelect"] [data-baseweb="tag"] * {{
+            background-color: {t['accent']} !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            fill: #ffffff !important;
+        }}
+
+        /* Раскрытый список вариантов (рисуется отдельно от страницы) */
+        [data-baseweb="popover"],
+        [data-baseweb="popover"] *,
+        [data-baseweb="menu"],
+        [data-baseweb="menu"] * {{
+            background-color: {t['card']} !important;
+            color: {t['fg']} !important;
+            -webkit-text-fill-color: {t['fg']} !important;
+        }}
+        [data-baseweb="popover"] li:hover,
+        [data-baseweb="popover"] li:hover *,
+        [data-baseweb="popover"] li[aria-selected="true"],
+        [data-baseweb="popover"] li[aria-selected="true"] * {{
+            background-color: {t['bg']} !important;
+        }}
+
+        /* Кнопки: белые, при наведении цвет акцента */
+        .stApp .stButton > button,
+        .stApp .stFormSubmitButton > button {{
+            background-color: #ffffff !important;
+            border: 1px solid {t['border']} !important;
+            transition: background-color 0.15s, border-color 0.15s;
+        }}
+        .stApp .stButton > button p,
+        .stApp .stFormSubmitButton > button p {{
+            color: #111111 !important;
+        }}
+        .stApp .stButton > button:hover,
+        .stApp .stFormSubmitButton > button:hover {{
+            background-color: {t['accent']} !important;
+            border-color: {t['accent']} !important;
+        }}
+        .stApp .stButton > button:hover p,
+        .stApp .stFormSubmitButton > button:hover p {{
+            color: #ffffff !important;
         }}
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+
+# ---------- Аккаунт: кнопки и форма ----------
+def render_auth_buttons():
+    """Кнопки в правой колонке: либо вход/регистрация, либо имя и выход."""
+    if st.session_state.user:
+        st.markdown(f"**{st.session_state.user}**")
+        if st.button("Выйти", use_container_width=True):
+            st.session_state.user = None
+            st.rerun()
+        return
+
+    if st.button("Войти", use_container_width=True):
+        st.session_state.auth_mode = "login"
+    if st.button("Регистрация", use_container_width=True):
+        st.session_state.auth_mode = "register"
+
+
+def render_auth_form():
+    """Форма входа или регистрации, открывается по нажатию кнопки."""
+    mode = st.session_state.auth_mode
+    if mode is None or st.session_state.user:
+        return
+
+    title = "Вход" if mode == "login" else "Регистрация"
+    with st.form(f"{mode}_form", clear_on_submit=False):
+        st.subheader(title)
+        login = st.text_input("Логин")
+        password = st.text_input("Пароль", type="password")
+        submitted = st.form_submit_button(title, use_container_width=True)
+
+    if submitted:
+        if not login or not password:
+            st.warning("Заполни логин и пароль.")
+        elif mode == "register":
+            if login in st.session_state.users:
+                st.error("Такой логин уже занят.")
+            else:
+                st.session_state.users[login] = password
+                st.session_state.user = login
+                st.session_state.auth_mode = None
+                st.rerun()
+        else:  # login
+            if st.session_state.users.get(login) == password:
+                st.session_state.user = login
+                st.session_state.auth_mode = None
+                st.rerun()
+            else:
+                st.error("Неверный логин или пароль.")
 
 
 # ---------- Картинки в памяти ----------
@@ -133,7 +299,10 @@ def render_card(p: dict):
             st.markdown(f"**{fmt_price(p['price'])}**")
 
         if st.button("В корзину", key=f"add_{p['id']}", use_container_width=True):
-            st.toast(f"«{p['name']}» добавлен (демо)")
+            if st.session_state.user:
+                st.toast(f"«{p['name']}» добавлен (демо)")
+            else:
+                st.toast("Чтобы добавить в корзину, войди в аккаунт")
 
 
 def render_catalog():
@@ -141,6 +310,8 @@ def render_catalog():
     main, right = st.columns([5, 1])
 
     with right:
+        render_auth_buttons()
+        st.divider()
         st.subheader("Тема")
         theme_name = st.radio("Тема", list(THEMES.keys()), label_visibility="collapsed")
 
@@ -177,6 +348,7 @@ def render_catalog():
 
     with main:
         st.markdown('<div class="ozon-brand">Ozon4ik</div>', unsafe_allow_html=True)
+        render_auth_form()
         st.header("Каталог товаров")
         st.caption("Демонстрационные данные, не из датасетов проекта")
         st.write(f"Найдено товаров: **{len(items)}**")
