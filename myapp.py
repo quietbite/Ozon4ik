@@ -1,5 +1,5 @@
 # catalog_demo.py
-# Самодостаточный демо-каталог: данные, картинки, тема, аккаунт и страница в одном файле.
+# Самодостаточный демо-каталог: данные, картинки, тема, аккаунт, корзина и страницы в одном файле.
 import base64
 import io
 
@@ -8,13 +8,17 @@ from PIL import Image, ImageDraw, ImageFont
 
 st.set_page_config(page_title="Каталог", page_icon="🛍️", layout="wide")
 
-# ---------- Аккаунт (демо, без базы данных) ----------
+# ---------- Состояние сессии (демо, без базы данных) ----------
 if "users" not in st.session_state:
     st.session_state.users = {"demo": "demo"}   # логин: пароль
 if "user" not in st.session_state:
     st.session_state.user = None                 # текущий вошедший пользователь
 if "auth_mode" not in st.session_state:
     st.session_state.auth_mode = None            # None, "login" или "register"
+if "page" not in st.session_state:
+    st.session_state.page = "Каталог"            # текущая страница
+if "cart" not in st.session_state:
+    st.session_state.cart = {}                   # id товара: количество
 
 # ---------- Фейковые данные ----------
 PRODUCTS = [
@@ -31,6 +35,7 @@ PRODUCTS = [
     {"id": 11, "name": "Чайник электрический", "category": "Дом", "price": 2190, "old_price": 2590, "rating": 4.1, "reviews": 39},
     {"id": 12, "name": "Смарт-часы", "category": "Техника", "price": 8990, "old_price": 10990, "rating": 4.5, "reviews": 230},
 ]
+PRODUCTS_BY_ID = {p["id"]: p for p in PRODUCTS}
 
 CATEGORY_COLORS = {
     "Спорт": (255, 138, 101),
@@ -41,6 +46,13 @@ CATEGORY_COLORS = {
     "Книги": (149, 117, 205),
 }
 
+# Демо-история заказов для личного кабинета
+FAKE_ORDERS = [
+    {"number": "№ 10482", "date": "02.11.2026", "items": "Наушники беспроводные", "total": 5490, "status": "Доставлен"},
+    {"number": "№ 10317", "date": "21.10.2026", "items": "Худи с капюшоном, Футболка хлопковая", "total": 3780, "status": "Доставлен"},
+    {"number": "№ 10190", "date": "05.10.2026", "items": "Йога-коврик", "total": 1400, "status": "В пути"},
+]
+
 # ---------- Темы ----------
 THEMES = {
     "Дневная": {
@@ -50,7 +62,7 @@ THEMES = {
         "border": "#e3e6ea",    # рамки
         "fg": "#14171a",        # основной текст
         "muted": "#6b7280",     # второстепенный текст
-        "accent": "#1e88e5",    # акцент (наведение, теги)
+        "accent": "#1e88e5",    # акцент (наведение, теги, активная вкладка)
     },
     "Тёмная": {
         "bg": "#0f1115",
@@ -87,10 +99,11 @@ def apply_theme(theme_name: str):
             color: {t['muted']} !important;
         }}
         .ozon-brand {{
-            font-size: 22px;
+            font-size: 24px;
             font-weight: 700;
             color: {t['fg']};
-            margin: 0 0 8px 0;
+            line-height: 2.4rem;
+            margin: 0;
         }}
 
         /* Карточки товаров */
@@ -134,7 +147,7 @@ def apply_theme(theme_name: str):
             fill: {t['muted']} !important;
         }}
 
-        /* Теги выбранных категорий (после общего правила, чтобы перекрыть его) */
+        /* Теги выбранных категорий */
         [data-testid="stMultiSelect"] [data-baseweb="tag"],
         [data-testid="stMultiSelect"] [data-baseweb="tag"] * {{
             background-color: {t['accent']} !important;
@@ -143,7 +156,7 @@ def apply_theme(theme_name: str):
             fill: #ffffff !important;
         }}
 
-        /* Раскрытый список вариантов (рисуется отдельно от страницы) */
+        /* Раскрытый список вариантов */
         [data-baseweb="popover"],
         [data-baseweb="popover"] *,
         [data-baseweb="menu"],
@@ -179,10 +192,55 @@ def apply_theme(theme_name: str):
         .stApp .stFormSubmitButton > button:hover p {{
             color: #ffffff !important;
         }}
+
+        /* Активная вкладка верхней панели (primary): синяя с белым текстом */
+        .stApp .stButton > button[kind="primary"],
+        .stApp .stButton > button[data-testid="stBaseButton-primary"] {{
+            background-color: {t['accent']} !important;
+            border-color: {t['accent']} !important;
+        }}
+        .stApp .stButton > button[kind="primary"] p,
+        .stApp .stButton > button[data-testid="stBaseButton-primary"] p {{
+            color: #ffffff !important;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
     )
+
+
+# ---------- Навигация ----------
+PAGES = ["Каталог", "Корзина", "Личный кабинет"]
+
+
+def go_to(page: str):
+    st.session_state.page = page
+
+
+def cart_count() -> int:
+    return sum(st.session_state.cart.values())
+
+
+def render_nav():
+    """Верхняя панель: название сайта и кнопки перехода между страницами."""
+    brand, c1, c2, c3, _ = st.columns([2, 1, 1, 1.3, 3])
+    brand.markdown('<div class="ozon-brand">Ozon4ik</div>', unsafe_allow_html=True)
+
+    labels = {
+        "Каталог": "Каталог",
+        "Корзина": f"Корзина ({cart_count()})" if cart_count() else "Корзина",
+        "Личный кабинет": "Личный кабинет",
+    }
+    for col, page in zip([c1, c2, c3], PAGES):
+        col.button(
+            labels[page],
+            key=f"nav_{page}",
+            use_container_width=True,
+            type="primary" if st.session_state.page == page else "secondary",
+            on_click=go_to,
+            args=(page,),
+        )
+    st.divider()
 
 
 # ---------- Аккаунт: кнопки и форма ----------
@@ -278,11 +336,29 @@ def product_image_uri(name: str, category: str) -> str:
     return f"data:image/png;base64,{b64}"
 
 
-# ---------- Карточка и страница ----------
+# ---------- Корзина ----------
 def fmt_price(value: float) -> str:
     return f"{value:,.0f} ₽".replace(",", " ")
 
 
+def add_to_cart(pid: int):
+    p = PRODUCTS_BY_ID[pid]
+    if not st.session_state.user:
+        st.toast("Чтобы добавить в корзину, войди в аккаунт")
+        return
+    st.session_state.cart[pid] = st.session_state.cart.get(pid, 0) + 1
+    st.toast(f"«{p['name']}» добавлен в корзину")
+
+
+def remove_from_cart(pid: int):
+    st.session_state.cart.pop(pid, None)
+
+
+def clear_cart():
+    st.session_state.cart = {}
+
+
+# ---------- Страница: каталог ----------
 def render_card(p: dict):
     with st.container(border=True):
         st.markdown(
@@ -298,26 +374,17 @@ def render_card(p: dict):
         else:
             st.markdown(f"**{fmt_price(p['price'])}**")
 
-        if st.button("В корзину", key=f"add_{p['id']}", use_container_width=True):
-            if st.session_state.user:
-                st.toast(f"«{p['name']}» добавлен (демо)")
-            else:
-                st.toast("Чтобы добавить в корзину, войди в аккаунт")
+        st.button(
+            "В корзину",
+            key=f"add_{p['id']}",
+            use_container_width=True,
+            on_click=add_to_cart,
+            args=(p["id"],),
+        )
 
 
-def render_catalog():
-    # Основная область и правая панель
-    main, right = st.columns([5, 1])
-
-    with right:
-        render_auth_buttons()
-        st.divider()
-        st.subheader("Тема")
-        theme_name = st.radio("Тема", list(THEMES.keys()), label_visibility="collapsed")
-
-    apply_theme(theme_name)
-
-    # Фильтры в левой боковой панели
+def render_catalog_page():
+    # Фильтры в левой боковой панели (только на странице каталога)
     with st.sidebar:
         st.subheader("Фильтры")
         categories = sorted({p["category"] for p in PRODUCTS})
@@ -346,23 +413,103 @@ def render_catalog():
     key, reverse = sort_keys[sort_by]
     items = sorted(items, key=key, reverse=reverse)
 
+    st.header("Каталог товаров")
+    st.caption("Демонстрационные данные, не из датасетов проекта")
+    st.write(f"Найдено товаров: **{len(items)}**")
+
+    if not items:
+        st.info("По выбранным фильтрам ничего не найдено.")
+        return
+
+    cols_per_row = 4
+    for i in range(0, len(items), cols_per_row):
+        cols = st.columns(cols_per_row)
+        for col, product in zip(cols, items[i:i + cols_per_row]):
+            with col:
+                render_card(product)
+
+
+# ---------- Страница: корзина ----------
+def render_cart_page():
+    st.header("Корзина")
+
+    if not st.session_state.cart:
+        st.info("Корзина пуста. Добавь товары на странице «Каталог».")
+        st.button("Перейти в каталог", on_click=go_to, args=("Каталог",))
+        return
+
+    total = 0
+    for pid, qty in st.session_state.cart.items():
+        p = PRODUCTS_BY_ID[pid]
+        line_total = p["price"] * qty
+        total += line_total
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns([4, 1, 2, 1.5])
+            c1.markdown(f"**{p['name']}**")
+            c1.caption(p["category"])
+            c2.markdown(f"× {qty}")
+            c3.markdown(f"**{fmt_price(line_total)}**")
+            c4.button("Удалить", key=f"rm_{pid}", use_container_width=True,
+                      on_click=remove_from_cart, args=(pid,))
+
+    st.markdown(f"### Итого: {fmt_price(total)}")
+    b1, b2, _ = st.columns([1.5, 1.5, 4])
+    if b1.button("Оформить заказ", use_container_width=True):
+        st.toast("Оформление заказа в демо не реализовано")
+    b2.button("Очистить", use_container_width=True, on_click=clear_cart)
+
+
+# ---------- Страница: личный кабинет ----------
+def render_account_page():
+    st.header("Личный кабинет")
+
+    if not st.session_state.user:
+        st.info("Войди или зарегистрируйся с помощью кнопок справа, чтобы увидеть личный кабинет.")
+        return
+
+    with st.container(border=True):
+        st.subheader(st.session_state.user)
+        st.caption("Демо-профиль, данные хранятся только в текущей сессии")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Товаров в корзине", cart_count())
+        m2.metric("Заказов", len(FAKE_ORDERS))
+        m3.metric("Потрачено", fmt_price(sum(o["total"] for o in FAKE_ORDERS)))
+
+    st.subheader("История заказов")
+    for o in FAKE_ORDERS:
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([2, 5, 2])
+            c1.markdown(f"**{o['number']}**")
+            c1.caption(o["date"])
+            c2.markdown(o["items"])
+            c3.markdown(f"**{fmt_price(o['total'])}**")
+            c3.caption(o["status"])
+
+
+# ---------- Сборка приложения ----------
+def render_app():
+    render_nav()
+
+    # Основная область и правая панель
+    main, right = st.columns([5, 1])
+
+    with right:
+        render_auth_buttons()
+        st.divider()
+        st.subheader("Тема")
+        theme_name = st.radio("Тема", list(THEMES.keys()), label_visibility="collapsed")
+
+    apply_theme(theme_name)
+
     with main:
-        st.markdown('<div class="ozon-brand">Ozon4ik</div>', unsafe_allow_html=True)
         render_auth_form()
-        st.header("Каталог товаров")
-        st.caption("Демонстрационные данные, не из датасетов проекта")
-        st.write(f"Найдено товаров: **{len(items)}**")
-
-        if not items:
-            st.info("По выбранным фильтрам ничего не найдено.")
-            return
-
-        cols_per_row = 4
-        for i in range(0, len(items), cols_per_row):
-            cols = st.columns(cols_per_row)
-            for col, product in zip(cols, items[i:i + cols_per_row]):
-                with col:
-                    render_card(product)
+        page = st.session_state.page
+        if page == "Каталог":
+            render_catalog_page()
+        elif page == "Корзина":
+            render_cart_page()
+        else:
+            render_account_page()
 
 
-render_catalog()
+render_app()
